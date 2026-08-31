@@ -23,8 +23,8 @@ BLENDER_EXE = r"C:\Program Files\Blender Foundation\Blender 4.1\blender.exe"
 
 BLENDER_SCRIPT = r"E:\Humcode\Test Images\Python wall\blender_wall_generator.py"
 
-# FBX will be created beside the selected image unless changed
-FBX_OUTPUT_NAME = "DetectedWalls.fbx"
+# GLB will be created beside the selected image unless changed
+GLB_OUTPUT_NAME = "DetectedWalls.glb"
 
 
 # ------------------------------------------------------------
@@ -46,11 +46,11 @@ CANNY_HIGH = 150
 # Hough detection
 # ------------------------------------------------------------
 
-HOUGH_THRESHOLD = 50
+HOUGH_THRESHOLD = 20
 
-MIN_LINE_LENGTH = 100
+MIN_LINE_LENGTH = 60
 
-MAX_LINE_GAP = 25
+MAX_LINE_GAP = 15
 
 
 # ------------------------------------------------------------
@@ -59,14 +59,14 @@ MAX_LINE_GAP = 25
 
 ANGLE_TOLERANCE = 8
 
-MIN_WALL_LENGTH = 100
+MIN_WALL_LENGTH = 60
 
 # Two parallel lines must be within this distance
-MIN_WALL_DISTANCE = 5
-MAX_WALL_DISTANCE = 80
+MIN_WALL_DISTANCE = 3
+MAX_WALL_DISTANCE = 30
 
 # How much the two wall lines need to overlap
-MIN_OVERLAP_RATIO = 0.40
+MIN_OVERLAP_RATIO = 0.55
 
 
 # ------------------------------------------------------------
@@ -448,7 +448,10 @@ def line_overlap(a, b):
 
 def find_wall_candidates(lines):
 
+    # A floor-plan wall is normally drawn as two nearby, parallel strokes.
+    # Keep the centre of each validated pair, rather than both outer strokes.
     candidates = []
+    seen_pairs = set()
 
     for i, line_a in enumerate(lines):
 
@@ -456,6 +459,7 @@ def find_wall_candidates(lines):
             continue
 
         best_pair = None
+        best_pair_index = None
         best_score = 0
 
         for j, line_b in enumerate(lines):
@@ -511,17 +515,35 @@ def find_wall_candidates(lines):
 
                 best_score = score
                 best_pair = line_b
+                best_pair_index = j
 
         # ----------------------------------------------------
         # A line is considered wall-like only when it has
         # another nearby parallel supporting line.
         # ----------------------------------------------------
 
-        if best_pair is not None:
+        if best_pair is None:
+            continue
 
-            candidates.append(
-                line_a
-            )
+        pair_key = tuple(sorted((i, best_pair_index)))
+        if pair_key in seen_pairs:
+            continue
+        seen_pairs.add(pair_key)
+
+        # Keep only the overlap: a doorway extension on one face should not
+        # turn into a false continuation of a wall.
+        if line_a["orientation"] == "horizontal":
+            start = max(min(line_a["x1"], line_a["x2"]), min(best_pair["x1"], best_pair["x2"]))
+            end = min(max(line_a["x1"], line_a["x2"]), max(best_pair["x1"], best_pair["x2"]))
+            center = (line_a["y1"] + line_a["y2"] + best_pair["y1"] + best_pair["y2"]) / 4.0
+            candidates.append({"x1": start, "y1": center, "x2": end, "y2": center,
+                               "length": end - start, "orientation": "horizontal"})
+        else:
+            start = max(min(line_a["y1"], line_a["y2"]), min(best_pair["y1"], best_pair["y2"]))
+            end = min(max(line_a["y1"], line_a["y2"]), max(best_pair["y1"], best_pair["y2"]))
+            center = (line_a["x1"] + line_a["x2"] + best_pair["x1"] + best_pair["x2"]) / 4.0
+            candidates.append({"x1": center, "y1": start, "x2": center, "y2": end,
+                               "length": end - start, "orientation": "vertical"})
 
     return candidates
 
@@ -967,9 +989,9 @@ def run_blender(
             + BLENDER_SCRIPT
         )
 
-    fbx_output = os.path.join(
+    glb_output = os.path.join(
         image_directory,
-        FBX_OUTPUT_NAME
+        GLB_OUTPUT_NAME
     )
 
     print("\n")
@@ -990,8 +1012,8 @@ def run_blender(
         "--walls_json",
         walls_json_path,
 
-        "--output_fbx",
-        fbx_output
+        "--output_glb",
+        glb_output
     ]
 
     print(
@@ -1047,15 +1069,15 @@ def run_blender(
     )
 
     if os.path.isfile(
-        fbx_output
+        glb_output
     ):
 
         print(
-            "\nFINAL FBX:"
+            "\nFINAL GLB:"
         )
 
         print(
-            fbx_output
+            glb_output
         )
 
         return True
@@ -1066,7 +1088,7 @@ def run_blender(
 
     print(
         "Blender returned success, "
-        "but the FBX file was not found."
+        "but the GLB file was not found."
     )
 
     return False
